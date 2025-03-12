@@ -1,0 +1,17 @@
+# Dependências do Node.js
+node_modules/
+
+# Arquivos de variáveis de ambiente
+.env
+
+# Pasta de uploads temporários
+uploads/
+
+# Arquivos de log
+npm-debug.log
+yarn-error.log
+*.log
+
+# Arquivos gerados por sistemas operacionais ou editores
+.DS_Store
+Thumbs.db
