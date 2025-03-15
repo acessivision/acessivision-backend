@@ -33,17 +33,11 @@ async function processImage(imagePath) {
     const model = new vl({ apiKey });
     const encodedImage = await fs.readFile(imagePath);
 
-    const [captionResult, queryResult] = await Promise.all([
-        model.caption({ image: encodedImage }),
-        model.query({ image: encodedImage, question: "Describe in detail what you see" }),
-    ]);
+    const queryResult = await model.query({ image: encodedImage, question: "Describe in detail what you see" });
 
-    const [translatedCaption, translatedAnswer] = await Promise.all([
-        translate(captionResult.caption, { to: 'pt' }).then(res => res.text),
-        translate(queryResult.answer, { to: 'pt' }).then(res => res.text),
-    ]);
+    const translatedAnswer = await translate(queryResult.answer, { to: 'pt' }).then(res => res.text);
 
-    return { caption: translatedCaption, answer: translatedAnswer };
+    return { answer: translatedAnswer };
 }
 
 // Rota de upload
