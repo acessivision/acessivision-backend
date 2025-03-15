@@ -5,15 +5,24 @@ import { translate } from '@vitalets/google-translate-api';
 import { vl } from 'moondream';
 import fs from 'fs/promises';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+// Converte import.meta.url para __dirname e __filename
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
 // Inicializa o Fastify
 const app = Fastify({ logger: true });
 
+// Cria a pasta uploads se não existir
+const uploadDir = path.join(__dirname, 'uploads');
+await fs.mkdir(uploadDir, { recursive: true }).catch(err => console.log('Pasta uploads já existe ou erro:', err));
+
 // Registra o plugin de multipart para lidar com uploads
 app.register(multipart, {
-    limits: { fileSize: 1024 * 1024 * 5 }, // Limite de 5MB, igual ao multer
+    limits: { fileSize: 1024 * 1024 * 5 }, // Limite de 5MB
 });
 
 // Função para processar a imagem
@@ -26,7 +35,7 @@ async function processImage(imagePath) {
 
     const [captionResult, queryResult] = await Promise.all([
         model.caption({ image: encodedImage }),
-        model.query({ image: encodedImage, question: "Describe in detail what you see." }),
+        model.query({ image: encodedImage, question: "Describe in detail what you see" }),
     ]);
 
     const [translatedCaption, translatedAnswer] = await Promise.all([
@@ -45,12 +54,12 @@ app.post('/upload', async (req, reply) => {
         return;
     }
 
-    const filePath = path.join('uploads', data.filename); // Caminho onde o arquivo será salvo
+    const filePath = path.join(__dirname, 'uploads', data.filename); // Caminho ajustado
 
     try {
-        // Salva o arquivo manualmente
-        await data.toBuffer(); // Garante que o arquivo esteja disponível
-        await fs.writeFile(filePath, await data.toBuffer());
+        // Salva o arquivo
+        const buffer = await data.toBuffer();
+        await fs.writeFile(filePath, buffer);
 
         const result = await processImage(filePath);
         reply.send(result);
