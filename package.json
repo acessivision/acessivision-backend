@@ -3,7 +3,7 @@
   "dependencies": {
     "@fastify/multipart": "^9.0.3",
     "@google-cloud/translate": "^8.5.0",
-    "@vitalets/google-translate-api": "^9.2.1",
+    "@iamtraction/google-translate": "^2.0.1",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "fastify": "^5.2.1",

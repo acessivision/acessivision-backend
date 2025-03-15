@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import dotenv from 'dotenv';
 import multipart from '@fastify/multipart';
-import { translate } from '@vitalets/google-translate-api';
+import translate from '@iamtraction/google-translate';
 import { vl } from 'moondream';
 import fs from 'fs/promises';
 import path from 'path';
@@ -33,22 +33,28 @@ async function processImage(imagePath) {
     const model = new vl({ apiKey });
     const encodedImage = await fs.readFile(imagePath);
 
-    const queryResult = await model.query({ image: encodedImage, question: "Describe in detail what you see" });
+    const queryResult = await model.query({ 
+        image: encodedImage, 
+        question: "Describe in detail what you see" 
+    });
 
-    const translatedAnswer = await translate(queryResult.answer, { to: 'pt' }).then(res => res.text);
+    // Usando @iamtraction/google-translate
+    const translatedAnswer = await translate(queryResult.answer, { 
+        to: 'pt' 
+    });
 
-    return { answer: translatedAnswer };
+    return { answer: translatedAnswer.text }; //.text
 }
 
 // Rota de upload
 app.post('/upload', async (req, reply) => {
-    const data = await req.file(); // Obtém o arquivo enviado
+    const data = await req.file(); 
     if (!data) {
         reply.status(400).send('Nenhuma imagem foi enviada.');
         return;
     }
 
-    const filePath = path.join(__dirname, 'uploads', data.filename); // Caminho ajustado
+    const filePath = path.join(__dirname, 'uploads', data.filename);
 
     try {
         // Salva o arquivo
