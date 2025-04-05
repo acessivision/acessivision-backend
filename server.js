@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import dotenv from 'dotenv';
 import multipart from '@fastify/multipart';
+import cors from '@fastify/cors';
 import translate from '@iamtraction/google-translate';
 import { vl } from 'moondream';
 import fs from 'fs/promises';
@@ -15,6 +16,11 @@ dotenv.config();
 
 // Inicializa o Fastify
 const app = Fastify({ logger: true });
+
+// Register CORS plugin
+app.register(cors, {
+    origin: '*', // Allow all origins for development; restrict this in production
+  });
 
 // Cria a pasta uploads se não existir
 const uploadDir = path.join(__dirname, 'uploads');
@@ -75,10 +81,10 @@ app.post('/upload', async (req, reply) => {
 
 // Inicia o servidor
 const port = process.env.PORT || 3000;
-app.listen({ port }, (err) => {
-    if (err) {
-        console.error(err);
-        process.exit(1);
-    }
-    console.log(`Servidor rodando na porta ${port}`);
+app.listen({ port, host: '0.0.0.0' }, (err) => { // Changed to 0.0.0.0
+  if (err) {
+    console.error(err);
+    process.exit(1);
+  }
+  console.log(`Servidor rodando na porta ${port}`);
 });
