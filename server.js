@@ -7,81 +7,85 @@ import { vl } from 'moondream';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import gTTS from 'gtts';
 
-// Converte import.meta.url para __dirname e __filename
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
-// Inicializa o Fastify
 const app = Fastify({ logger: true });
 
-// Register CORS plugin
 app.register(cors, {
-    origin: '*', // Allow all origins for development; restrict this in production
-  });
+  origin: '*', // Restrinja em produção
+});
 
-// Cria a pasta uploads se não existir
 const uploadDir = path.join(__dirname, 'uploads');
 await fs.mkdir(uploadDir, { recursive: true }).catch(err => console.log('Pasta uploads já existe ou erro:', err));
 
-// Registra o plugin de multipart para lidar com uploads
 app.register(multipart, {
-    limits: { fileSize: 1024 * 1024 * 5 }, // Limite de 5MB
+  limits: { fileSize: 1024 * 1024 * 5 }, // 5MB
 });
 
-// Função para processar a imagem
 async function processImage(imagePath) {
     const apiKey = process.env.MOONDREAM_API_KEY;
     if (!apiKey) throw new Error("API Key não encontrada!");
-
+  
     const model = new vl({ apiKey });
     const encodedImage = await fs.readFile(imagePath);
-
-    const queryResult = await model.query({ 
-        image: encodedImage, 
-        question: "Describe in detail what you see" 
+  
+    // Usando caption com length="short" para uma descrição curta
+    const captionResult = await model.caption({ 
+      image: encodedImage, 
+      length: "short" 
     });
+  
+    const translatedAnswer = await translate(captionResult.caption, { to: 'pt' });
+    return translatedAnswer.text;
+  }
 
-    // Usando @iamtraction/google-translate
-    const translatedAnswer = await translate(queryResult.answer, { 
-        to: 'pt' 
+async function textToAudio(text, outputPath) {
+  return new Promise((resolve, reject) => {
+    const gtts = new gTTS(text, 'pt');
+    gtts.save(outputPath, (err) => {
+      if (err) return reject(err);
+      resolve(outputPath);
     });
-
-    return { answer: translatedAnswer.text }; //.text
+  });
 }
 
-// Rota de upload
 app.post('/upload', async (req, reply) => {
-    const data = await req.file(); 
-    if (!data) {
-        reply.status(400).send('Nenhuma imagem foi enviada.');
-        return;
-    }
+  const data = await req.file();
+  if (!data) {
+    reply.status(400).send('Nenhuma imagem foi enviada.');
+    return;
+  }
 
-    const filePath = path.join(__dirname, 'uploads', data.filename);
+  const filePath = path.join(__dirname, 'uploads', data.filename);
+  const audioPath = path.join(__dirname, 'uploads', `${data.filename}.mp3`);
 
-    try {
-        // Salva o arquivo
-        const buffer = await data.toBuffer();
-        await fs.writeFile(filePath, buffer);
+  try {
+    const buffer = await data.toBuffer();
+    await fs.writeFile(filePath, buffer);
 
-        const result = await processImage(filePath);
-        reply.send(result);
-    } catch (error) {
-        console.error('Erro ao processar a requisição:', error.message);
-        reply.status(500).send('Erro ao processar a imagem: ' + error.message);
-    } finally {
-        if (filePath) {
-            fs.unlink(filePath).catch(err => console.error('Erro ao remover arquivo:', err));
-        }
-    }
+    const text = await processImage(filePath);
+    await textToAudio(text, audioPath);
+
+    const audioData = await fs.readFile(audioPath);
+    console.log('Tamanho do áudio enviado:', audioData.length);
+    reply.header('Content-Type', 'audio/mpeg');
+    reply.send(audioData);
+  } catch (error) {
+    console.error('Erro ao processar a requisição:', error.message);
+    reply.status(500).send('Erro ao processar a imagem: ' + error.message);
+  } finally {
+    if (filePath) fs.unlink(filePath).catch(err => console.error('Erro ao remover arquivo:', err));
+    if (audioPath) fs.unlink(audioPath).catch(err => console.error('Erro ao remover áudio:', err));
+  }
 });
 
-// Inicia o servidor
 const port = process.env.PORT || 3000;
-app.listen({ port, host: '0.0.0.0' }, (err) => { // Changed to 0.0.0.0
+app.listen({ port, host: '0.0.0.0' }, (err) => {
   if (err) {
     console.error(err);
     process.exit(1);
