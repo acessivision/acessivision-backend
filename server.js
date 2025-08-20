@@ -74,7 +74,8 @@ app.post('/upload', async (req, reply) => {
     const audioData = await fs.readFile(audioPath);
     console.log('Tamanho do áudio enviado:', audioData.length);
     reply.header('Content-Type', 'audio/mpeg');
-    reply.send(audioData);
+    reply.header('Content-Disposition', 'inline; filename="audio.mp3"');
+    reply.send(Buffer.from(audioData));
   } catch (error) {
     console.error('Erro ao processar a requisição:', error.message);
     reply.status(500).send('Erro ao processar a imagem: ' + error.message);
