@@ -15,3 +15,5 @@ yarn-error.log
 # Arquivos gerados por sistemas operacionais ou editores
 .DS_Store
 Thumbs.db
+
+acessivision-firebase-adminsdk.json
