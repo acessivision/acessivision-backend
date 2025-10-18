@@ -7,6 +7,7 @@
     "@google-cloud/text-to-speech": "^6.3.1",
     "@google-cloud/translate": "^8.5.0",
     "@iamtraction/google-translate": "^2.0.1",
+    "bcrypt": "^6.0.0",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "fastify": "^5.6.1",
