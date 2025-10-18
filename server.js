@@ -7,24 +7,102 @@ import { vl } from 'moondream';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import gTTS from 'gtts';
+import { TextToSpeechClient } from '@google-cloud/text-to-speech';
+import util from 'util';
+import { OAuth2Client } from 'google-auth-library';
+import jwt from '@fastify/jwt';
+import { initializeApp, cert } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
+import serviceAccount from './serviceAccountKey.json' with { type: 'json' };
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
+initializeApp({
+  credential: cert(serviceAccount)
+});
+
+const db = getFirestore();
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_WEB_CLIENT_ID);
+
 const app = Fastify({ logger: true });
 
-app.register(cors, {
-  origin: '*', // Restrinja em produção
+app.register(cors, { origin: '*' });
+app.register(multipart, { limits: { fileSize: 1024 * 1024 * 5 } });
+app.register(jwt, {
+  secret: process.env.JWT_SECRET,
 });
 
 const uploadDir = path.join(__dirname, 'uploads');
 await fs.mkdir(uploadDir, { recursive: true }).catch(err => console.log('Pasta uploads já existe ou erro:', err));
 
-app.register(multipart, {
-  limits: { fileSize: 1024 * 1024 * 5 }, // 5MB
+app.post('/auth/google', async (req, reply) => {
+  const { idToken } = req.body;
+
+  if (!idToken) {
+    return reply.status(400).send({ success: false, message: 'idToken não fornecido.' });
+  }
+
+  try {
+    // Passo A: Validar o idToken com o Google (não muda)
+    const ticket = await googleClient.verifyIdToken({
+        idToken,
+        audience: process.env.GOOGLE_WEB_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+
+    if (!payload || !payload.email) {
+      return reply.status(401).send({ success: false, message: 'Token do Google inválido.' });
+    }
+
+    const { sub: googleId, email, name: nome, picture: fotoPerfil } = payload;
+    
+    // Passo B: Criar ou atualizar o usuário no Firestore
+    // Criamos uma referência para um documento na coleção 'users' usando o googleId como ID único
+    const userRef = db.collection('users').doc(googleId);
+
+    // Salvamos os dados. O { merge: true } garante que se o documento já existe,
+    // ele apenas atualiza os campos, em vez de apagar e recriar. É o equivalente do 'upsert'.
+    await userRef.set({
+      googleId,
+      email,
+      nome,
+      fotoPerfil,
+      updatedAt: new Date() // Adicionamos um campo para saber quando foi a última atualização
+    }, { merge: true });
+
+    // Pegamos os dados do usuário do banco para retornar na resposta
+    const userDoc = await userRef.get();
+    const usuario = userDoc.data();
+
+    // Passo C: Gerar um token JWT do NOSSO sistema (não muda)
+    const token = app.jwt.sign(
+      { 
+        uid: userDoc.id, // O ID do documento no Firestore
+        email: usuario.email 
+      }, 
+      { expiresIn: '7d' }
+    );
+
+    // Retorna sucesso com o token e os dados do usuário
+    reply.send({
+      success: true,
+      message: 'Autenticação bem-sucedida!',
+      token,
+      usuario: {
+        uid: userDoc.id,
+        nome: usuario.nome,
+        email: usuario.email,
+      },
+    });
+
+  } catch (error) {
+    console.error('Erro na autenticação com Google:', error);
+    reply.status(500).send({ success: false, message: 'Erro interno ao validar o token.' });
+  }
 });
 
 // Função sem anotações de tipo
@@ -68,13 +146,27 @@ async function processImage(imagePath, userPrompt) {
 }
 
 async function textToAudio(text, outputPath) {
-  return new Promise((resolve, reject) => {
-    const gtts = new gTTS(text, 'pt');
-    gtts.save(outputPath, (err) => {
-      if (err) return reject(err);
-      resolve(outputPath);
-    });
-  });
+  // Cria um cliente para a API
+  const client = new TextToSpeechClient();
+
+  // Configura a requisição de áudio
+  const request = {
+    input: { text: text },
+    // Seleciona o tipo de voz e linguagem
+    voice: { languageCode: 'pt-BR', ssmlGender: 'NEUTRAL' },
+    // Seleciona o tipo de codificação do áudio
+    audioConfig: { audioEncoding: 'MP3' },
+  };
+
+  // Faz a chamada para a API
+  const [response] = await client.synthesizeSpeech(request);
+  
+  // Escreve o áudio retornado em um arquivo
+  const writeFile = util.promisify(fs.writeFile);
+  await writeFile(outputPath, response.audioContent, 'binary');
+  
+  console.log(`Áudio salvo em: ${outputPath}`);
+  return outputPath;
 }
 
 app.post('/upload', async (req, reply) => {
@@ -126,7 +218,7 @@ app.post('/upload', async (req, reply) => {
   }
 });
 
-const port = Number(process.env.PORT) || 3000;
+const port = Number(process.env.PORT);
 app.listen({ port, host: '0.0.0.0' }, (err) => {
   if (err) {
     console.error(err);

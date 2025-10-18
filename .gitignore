@@ -15,3 +15,6 @@ yarn-error.log
 # Arquivos gerados por sistemas operacionais ou editores
 .DS_Store
 Thumbs.db
+
+# Credenciais da conta de serviço do Firebase
+serviceAccountKey.json
