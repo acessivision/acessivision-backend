@@ -7,7 +7,6 @@ import { vl } from 'moondream';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { TextToSpeechClient } from '@google-cloud/text-to-speech';
 import util from 'util';
 import { OAuth2Client } from 'google-auth-library';
 import jwt from '@fastify/jwt';
@@ -193,34 +192,9 @@ async function processImage(imagePath, userPrompt) {
   return translatedAnswer.text;
 }
 
-async function textToAudio(text, outputPath) {
-  // Cria um cliente para a API
-  const client = new TextToSpeechClient();
-
-  // Configura a requisição de áudio
-  const request = {
-    input: { text: text },
-    // Seleciona o tipo de voz e linguagem
-    voice: { languageCode: 'pt-BR', ssmlGender: 'NEUTRAL' },
-    // Seleciona o tipo de codificação do áudio
-    audioConfig: { audioEncoding: 'MP3' },
-  };
-
-  // Faz a chamada para a API
-  const [response] = await client.synthesizeSpeech(request);
-  
-  // Escreve o áudio retornado em um arquivo
-  const writeFile = util.promisify(fs.writeFile);
-  await writeFile(outputPath, response.audioContent, 'binary');
-  
-  console.log(`Áudio salvo em: ${outputPath}`);
-  return outputPath;
-}
-
 app.post('/upload', async (req, reply) => {
-  // Variáveis sem anotações de tipo
   let fileBuffer = null;
-  let userPrompt = 'Descreva a imagem.'; // Um prompt padrão
+  let userPrompt = 'Descreva a imagem.';
   let originalFilename = `upload-${Date.now()}`;
 
   const parts = req.parts();
@@ -230,39 +204,35 @@ app.post('/upload', async (req, reply) => {
         fileBuffer = await part.toBuffer();
         originalFilename = part.filename;
       } else if (part.type === 'field' && part.fieldname === 'prompt') {
-        // 'as string' removido
         userPrompt = part.value;
       }
     }
   } catch (error) {
-     console.error('Erro ao processar multipart form:', error);
-     return reply.status(500).send('Erro ao processar os dados enviados.');
+    console.error('Erro ao processar multipart form:', error);
+    return reply.status(500).send({ error: 'Erro ao processar os dados enviados.' });
   }
 
   if (!fileBuffer) {
-    return reply.status(400).send('Nenhuma imagem foi enviada.');
+    return reply.status(400).send({ error: 'Nenhuma imagem foi enviada.' });
   }
 
   const filePath = path.join(uploadDir, originalFilename);
-  const audioPath = path.join(uploadDir, `${originalFilename}.mp3`);
 
   try {
     await fs.writeFile(filePath, fileBuffer);
 
-    const text = await processImage(filePath, userPrompt);
-    await textToAudio(text, audioPath);
+    // 1. Processa a imagem para obter a descrição em texto
+    const descriptionText = await processImage(filePath, userPrompt);
 
-    const audioData = await fs.readFile(audioPath);
-    console.log('Tamanho do áudio enviado:', audioData.length);
-    reply.header('Content-Type', 'audio/mpeg');
-    reply.header('Content-Disposition', 'inline; filename="audio.mp3"');
-    reply.send(Buffer.from(audioData));
+    // 2. Envia o texto de volta como uma resposta JSON
+    reply.send({ description: descriptionText });
+
   } catch (error) {
     console.error('Erro ao processar a requisição:', error.message);
-    reply.status(500).send('Erro ao processar a imagem: ' + error.message);
+    reply.status(500).send({ error: 'Erro ao processar a imagem: ' + error.message });
   } finally {
+    // Apaga apenas o ficheiro de imagem temporário
     fs.unlink(filePath).catch(err => console.error('Erro ao remover arquivo de imagem:', err));
-    fs.unlink(audioPath).catch(err => console.error('Erro ao remover arquivo de áudio:', err));
   }
 });
 
