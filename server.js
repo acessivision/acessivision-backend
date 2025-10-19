@@ -15,6 +15,7 @@ import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import serviceAccount from './serviceAccountKey.json' with { type: 'json' };
 import bcrypt from 'bcrypt';
+import { getAuth } from 'firebase-admin/auth';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -49,8 +50,7 @@ app.post('/auth/register', async (req, reply) => {
       return reply.status(400).send({ success: false, message: 'Todos os campos são obrigatórios.' });
     }
 
-    // 2. Verificar se o usuário já existe no Firestore
-    const usersRef = db.collection('users');
+    const usersRef = db.collection('usuarios');
     const snapshot = await usersRef.where('email', '==', email).get();
 
     if (!snapshot.empty) {
@@ -107,7 +107,7 @@ app.post('/auth/login', async (req, reply) => {
     }
 
     // 2. Encontrar o usuário pelo email no Firestore
-    const usersRef = db.collection('users');
+    const usersRef = db.collection('usuarios');
     const snapshot = await usersRef.where('email', '==', email).limit(1).get();
 
     if (snapshot.empty) {
@@ -150,72 +150,6 @@ app.post('/auth/login', async (req, reply) => {
   } catch (error) {
     console.error('Erro no login:', error);
     reply.status(500).send({ success: false, message: 'Erro interno do servidor.' });
-  }
-});
-
-app.post('/auth/google', async (req, reply) => {
-  const { idToken } = req.body;
-
-  if (!idToken) {
-    return reply.status(400).send({ success: false, message: 'idToken não fornecido.' });
-  }
-
-  try {
-    // Passo A: Validar o idToken com o Google (não muda)
-    const ticket = await googleClient.verifyIdToken({
-        idToken,
-        audience: process.env.GOOGLE_WEB_CLIENT_ID,
-    });
-    const payload = ticket.getPayload();
-
-    if (!payload || !payload.email) {
-      return reply.status(401).send({ success: false, message: 'Token do Google inválido.' });
-    }
-
-    const { sub: googleId, email, name: nome, picture: fotoPerfil } = payload;
-    
-    // Passo B: Criar ou atualizar o usuário no Firestore
-    // Criamos uma referência para um documento na coleção 'users' usando o googleId como ID único
-    const userRef = db.collection('users').doc(googleId);
-
-    // Salvamos os dados. O { merge: true } garante que se o documento já existe,
-    // ele apenas atualiza os campos, em vez de apagar e recriar. É o equivalente do 'upsert'.
-    await userRef.set({
-      googleId,
-      email,
-      nome,
-      fotoPerfil,
-      updatedAt: new Date() // Adicionamos um campo para saber quando foi a última atualização
-    }, { merge: true });
-
-    // Pegamos os dados do usuário do banco para retornar na resposta
-    const userDoc = await userRef.get();
-    const usuario = userDoc.data();
-
-    // Passo C: Gerar um token JWT do NOSSO sistema (não muda)
-    const token = app.jwt.sign(
-      { 
-        uid: userDoc.id, // O ID do documento no Firestore
-        email: usuario.email 
-      }, 
-      { expiresIn: '7d' }
-    );
-
-    // Retorna sucesso com o token e os dados do usuário
-    reply.send({
-      success: true,
-      message: 'Autenticação bem-sucedida!',
-      token,
-      usuario: {
-        uid: userDoc.id,
-        nome: usuario.nome,
-        email: usuario.email,
-      },
-    });
-
-  } catch (error) {
-    console.error('Erro na autenticação com Google:', error);
-    reply.status(500).send({ success: false, message: 'Erro interno ao validar o token.' });
   }
 });
 
