@@ -7,39 +7,38 @@ import { vl } from 'moondream';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import gTTS from 'gtts';
-import admin from 'firebase-admin';
-import { readFileSync } from 'fs';
+import util from 'util';
+import { OAuth2Client } from 'google-auth-library';
+import jwt from '@fastify/jwt';
+import { initializeApp, cert } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
+import serviceAccount from './serviceAccountKey.json' with { type: 'json' };
+import bcrypt from 'bcrypt';
+import { getAuth } from 'firebase-admin/auth';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
-// INICIALIZA O FIREBASE ADMIN
-const serviceAccount = JSON.parse(
-  readFileSync('acessivision-firebase-adminsdk.json', 'utf8')
-);
-
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+initializeApp({
+  credential: cert(serviceAccount)
 });
 
-const db = admin.firestore();
-const auth = admin.auth();
+const db = getFirestore();
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_WEB_CLIENT_ID);
 
 const app = Fastify({ logger: true });
 
-app.register(cors, {
-  origin: '*', // Restrinjir em produção
+app.register(cors, { origin: '*' });
+app.register(multipart, { limits: { fileSize: 1024 * 1024 * 5 } });
+app.register(jwt, {
+  secret: process.env.JWT_SECRET,
 });
 
 const uploadDir = path.join(__dirname, 'uploads');
-await fs.mkdir(uploadDir, { recursive: true }).catch(err => console.log('Pasta uploads já existe:', err));
-
-app.register(multipart, {
-  limits: { fileSize: 1024 * 1024 * 5 }, // 5MB
-});
+await fs.mkdir(uploadDir, { recursive: true }).catch(err => console.log('Pasta uploads já existe ou erro:', err));
 
 // POST
 app.post('/auth/register', async (req, reply) => {
@@ -325,16 +324,6 @@ async function processImage(imagePath, userPrompt) {
   return translatedAnswer.text;
 }
 
-async function textToAudio(text, outputPath) {
-  return new Promise((resolve, reject) => {
-    const gtts = new gTTS(text, 'pt');
-    gtts.save(outputPath, (err) => {
-      if (err) return reject(err);
-      resolve(outputPath);
-    });
-  });
-}
-
 app.post('/upload', async (req, reply) => {
   let fileBuffer = null;
   let userPrompt = 'Descreva a imagem.';
@@ -351,38 +340,35 @@ app.post('/upload', async (req, reply) => {
       }
     }
   } catch (error) {
-     console.error('Erro ao processar multipart form:', error);
-     return reply.status(500).send('Erro ao processar os dados enviados.');
+    console.error('Erro ao processar multipart form:', error);
+    return reply.status(500).send({ error: 'Erro ao processar os dados enviados.' });
   }
 
   if (!fileBuffer) {
-    return reply.status(400).send('Nenhuma imagem foi enviada.');
+    return reply.status(400).send({ error: 'Nenhuma imagem foi enviada.' });
   }
 
   const filePath = path.join(uploadDir, originalFilename);
-  const audioPath = path.join(uploadDir, `${originalFilename}.mp3`);
 
   try {
     await fs.writeFile(filePath, fileBuffer);
 
-    const text = await processImage(filePath, userPrompt);
-    await textToAudio(text, audioPath);
+    // 1. Processa a imagem para obter a descrição em texto
+    const descriptionText = await processImage(filePath, userPrompt);
 
-    const audioData = await fs.readFile(audioPath);
-    console.log('Tamanho do áudio enviado:', audioData.length);
-    reply.header('Content-Type', 'audio/mpeg');
-    reply.header('Content-Disposition', 'inline; filename="audio.mp3"');
-    reply.send(Buffer.from(audioData));
+    // 2. Envia o texto de volta como uma resposta JSON
+    reply.send({ description: descriptionText });
+
   } catch (error) {
     console.error('Erro ao processar a requisição:', error.message);
-    reply.status(500).send('Erro ao processar a imagem: ' + error.message);
+    reply.status(500).send({ error: 'Erro ao processar a imagem: ' + error.message });
   } finally {
+    // Apaga apenas o ficheiro de imagem temporário
     fs.unlink(filePath).catch(err => console.error('Erro ao remover arquivo de imagem:', err));
-    fs.unlink(audioPath).catch(err => console.error('Erro ao remover arquivo de áudio:', err));
   }
 });
 
-const port = Number(process.env.PORT) || 3000;
+const port = Number(process.env.PORT);
 app.listen({ port, host: '0.0.0.0' }, (err) => {
   if (err) {
     console.error(err);

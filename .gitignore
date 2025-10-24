@@ -16,4 +16,5 @@ yarn-error.log
 .DS_Store
 Thumbs.db
 
-acessivision-firebase-adminsdk.json
+# Credenciais da conta de serviço do Firebase
+serviceAccountKey.json
