@@ -325,47 +325,63 @@ async function processImage(imagePath, userPrompt) {
 }
 
 app.post('/upload', async (req, reply) => {
-  let fileBuffer = null;
-  let userPrompt = 'Descreva a imagem.';
-  let originalFilename = `upload-${Date.now()}`;
+  let fileBuffer = null;
+  let userPrompt = 'Descreva a imagem.';
+  let originalFilename = `upload-${Date.now()}`;
 
-  const parts = req.parts();
-  try {
-    for await (const part of parts) {
-      if (part.type === 'file') {
-        fileBuffer = await part.toBuffer();
-        originalFilename = part.filename;
-      } else if (part.type === 'field' && part.fieldname === 'prompt') {
-        userPrompt = part.value;
-      }
-    }
-  } catch (error) {
-    console.error('Erro ao processar multipart form:', error);
-    return reply.status(500).send({ error: 'Erro ao processar os dados enviados.' });
-  }
+  const parts = req.parts();
+  try {
+    for await (const part of parts) {
+      if (part.type === 'file') {
+        fileBuffer = await part.toBuffer();
+        // Use o nome do arquivo que o frontend enviou ('photo.jpg')
+        // Dando a ele um nome único para evitar sobreposições
+        const timestamp = Date.now();
+        originalFilename = `${timestamp}-${part.filename}`;
+      } else if (part.type === 'field' && part.fieldname === 'prompt') {
+        userPrompt = part.value;
+      }
+    }
+  } catch (error) {
+    console.error('Erro ao processar multipart form:', error);
+    return reply.status(500).send({ error: 'Erro ao processar os dados enviados.' });
+  }
 
-  if (!fileBuffer) {
-    return reply.status(400).send({ error: 'Nenhuma imagem foi enviada.' });
-  }
+  if (!fileBuffer) {
+    return reply.status(400).send({ error: 'Nenhuma imagem foi enviada.' });
+  }
 
-  const filePath = path.join(uploadDir, originalFilename);
+  // O nome do arquivo agora é único, ex: '1678886400000-photo.jpg'
+  const filePath = path.join(uploadDir, originalFilename);
 
-  try {
-    await fs.writeFile(filePath, fileBuffer);
+  try {
+    // ==========================================================
+    // AQUI ESTÁ A CORREÇÃO PRINCIPAL
+    // Garante que a pasta 'uploads' exista ANTES de tentar escrever
+    // ==========================================================
+    await fs.mkdir(uploadDir, { recursive: true });
 
-    // 1. Processa a imagem para obter a descrição em texto
-    const descriptionText = await processImage(filePath, userPrompt);
+    // Agora o writeFile vai funcionar
+    await fs.writeFile(filePath, fileBuffer);
 
-    // 2. Envia o texto de volta como uma resposta JSON
-    reply.send({ description: descriptionText });
+    // 1. Processa a imagem para obter a descrição em texto
+    const descriptionText = await processImage(filePath, userPrompt);
 
-  } catch (error) {
-    console.error('Erro ao processar a requisição:', error.message);
-    reply.status(500).send({ error: 'Erro ao processar a imagem: ' + error.message });
-  } finally {
-    // Apaga apenas o ficheiro de imagem temporário
-    fs.unlink(filePath).catch(err => console.error('Erro ao remover arquivo de imagem:', err));
-  }
+    // 2. Envia o texto de volta como uma resposta JSON
+    reply.send({ description: descriptionText });
+
+  } catch (error) {
+    let errorMessage = 'Erro ao processar a imagem.';
+    if (error instanceof Error) {
+      errorMessage = error.message;
+    }
+    console.error('Erro ao processar a requisição:', errorMessage);
+    reply.status(500).send({ error: 'Erro ao processar a imagem: ' + errorMessage });
+  
+  } finally {
+    // Apaga o arquivo de imagem temporário
+    fs.unlink(filePath).catch(err => console.error('Erro ao remover arquivo de imagem:', err));
+  }
 });
 
 const port = Number(process.env.PORT);
