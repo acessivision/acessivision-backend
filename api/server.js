@@ -12,20 +12,23 @@ import { OAuth2Client } from 'google-auth-library';
 import jwt from '@fastify/jwt';
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
-import serviceAccount from './serviceAccountKey.json' with { type: 'json' };
 import bcrypt from 'bcrypt';
 import { getAuth } from 'firebase-admin/auth';
+import { readFile } from 'fs/promises';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
+const serviceAccount = JSON.parse(await readFile(new URL('../serviceAccountKey.json', import.meta.url)));
+
 initializeApp({
   credential: cert(serviceAccount)
 });
 
 const db = getFirestore();
+const auth = getAuth();
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_WEB_CLIENT_ID);
 
@@ -93,11 +96,11 @@ app.post('/auth/register', async (req, reply) => {
       uid: userRecord.uid,
       nome,
       email,
-      dataEnvio: admin.firestore.Timestamp.now(),
-      dataCriacao: admin.firestore.Timestamp.now(),
+      dataEnvio: new Date(),
+      dataCriacao: new Date(),
       autenticarEmail: false,
       criarContaManual: true,
-      atualizarPerfilDados: admin.firestore.Timestamp.now(),
+      atualizarPerfilDados: new Date(),
       fotoPerfil: null,
       telefone: null,
       configuracoes: {
@@ -224,7 +227,7 @@ app.put('/auth/profile/:uid', async (req, reply) => {
 
     // Dados para atualizar
     const updateData = {
-      atualizarPerfilDados: admin.firestore.Timestamp.now()
+      atualizarPerfilDados: new Date()
     };
 
     if (nome) updateData.nome = nome;
@@ -384,17 +387,13 @@ app.post('/upload', async (req, reply) => {
   }
 });
 
-const port = Number(process.env.PORT);
-app.listen({ port, host: '0.0.0.0' }, (err) => {
-  if (err) {
-    console.error(err);
-    process.exit(1);
-  }
-  console.log(`Servidor rodando em http://0.0.0.0:${port}`);
-  console.log(`\n📋 Endpoints disponíveis:`);
-  console.log(`   POST /auth/register - Criar usuário`);
-  console.log(`   POST /auth/login - Fazer login`);
-  console.log(`   PUT /auth/profile/:uid - Atualizar perfil`);
-  console.log(`   DELETE /auth/delete/:uid - Deletar conta`);
-  console.log(`   POST /upload - Processar imagem\n`);
-});
+export default async function handler(req, res) {
+  await app.ready();
+  app.server.emit('request', req, res);
+}
+console.log(`\n📋 Endpoints disponíveis:`);
+console.log(`   POST /auth/register - Criar usuário`);
+console.log(`   POST /auth/login - Fazer login`);
+console.log(`   PUT /auth/profile/:uid - Atualizar perfil`);
+console.log(`   DELETE /auth/delete/:uid - Deletar conta`);
+console.log(`   POST /upload - Processar imagem\n`);
