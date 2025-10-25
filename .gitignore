@@ -18,3 +18,5 @@ Thumbs.db
 
 # Credenciais da conta de serviço do Firebase
 serviceAccountKey.json
+
+acessivision-firebase-adminsdk.json
