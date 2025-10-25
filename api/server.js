@@ -14,14 +14,20 @@ import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import bcrypt from 'bcrypt';
 import { getAuth } from 'firebase-admin/auth';
-import { readFile } from 'fs/promises';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
-const serviceAccount = JSON.parse(await readFile(new URL('../serviceAccountKey.json', import.meta.url)));
+// ===================================================
+// Service Account via ENV (mais seguro para Vercel)
+// ===================================================
+const serviceAccount = {
+  projectId: process.env.FIREBASE_PROJECT_ID,
+  clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+  privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+};
 
 initializeApp({
   credential: cert(serviceAccount)
@@ -40,58 +46,42 @@ app.register(jwt, {
   secret: process.env.JWT_SECRET,
 });
 
-const uploadDir = path.join(__dirname, 'uploads');
+// ===================================================
+// Upload dir compatível com Serverless (Vercel)
+// ===================================================
+const uploadDir = '/tmp/uploads';
 await fs.mkdir(uploadDir, { recursive: true }).catch(err => console.log('Pasta uploads já existe ou erro:', err));
 
-// POST
+// ===================================================
+// ROTAS: Register / Login / Update / Delete
+// ===================================================
+
+// POST - REGISTER
 app.post('/auth/register', async (req, reply) => {
   try {
     const { email, password, nome } = req.body;
 
-    // Validações
     if (!email || !password || !nome) {
-      return reply.status(400).send({
-        success: false,
-        message: 'Email, senha e nome são obrigatórios'
-      });
+      return reply.status(400).send({ success: false, message: 'Email, senha e nome são obrigatórios' });
     }
 
     if (password.length < 6) {
-      return reply.status(400).send({
-        success: false,
-        message: 'A senha deve ter no mínimo 6 caracteres'
-      });
+      return reply.status(400).send({ success: false, message: 'A senha deve ter no mínimo 6 caracteres' });
     }
 
-    // Validar formato de email
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      return reply.status(400).send({
-        success: false,
-        message: 'Email inválido'
-      });
+      return reply.status(400).send({ success: false, message: 'Email inválido' });
     }
 
-    // Verificar se email já existe no Firestore
     const usuariosRef = db.collection('usuarios');
     const emailExists = await usuariosRef.where('email', '==', email).get();
-    
     if (!emailExists.empty) {
-      return reply.status(409).send({
-        success: false,
-        message: 'Este email já está cadastrado'
-      });
+      return reply.status(409).send({ success: false, message: 'Este email já está cadastrado' });
     }
 
-    // Criar usuário no Firebase Authentication
-    const userRecord = await auth.createUser({
-      email,
-      password,
-      displayName: nome,
-      emailVerified: false
-    });
+    const userRecord = await auth.createUser({ email, password, displayName: nome, emailVerified: false });
 
-    // Criar documento no Firestore
     const usuarioData = {
       uid: userRecord.uid,
       nome,
@@ -103,196 +93,107 @@ app.post('/auth/register', async (req, reply) => {
       atualizarPerfilDados: new Date(),
       fotoPerfil: null,
       telefone: null,
-      configuracoes: {
-        notificacoes: true,
-        tema: 'system'
-      }
+      configuracoes: { notificacoes: true, tema: 'system' }
     };
 
     await db.collection('usuarios').doc(userRecord.uid).set(usuarioData);
 
-    // Retornar sucesso (SEM retornar a senha!)
     return reply.status(201).send({
       success: true,
       message: 'Usuário criado com sucesso',
-      usuario: {
-        uid: userRecord.uid,
-        nome,
-        email
-      }
+      usuario: { uid: userRecord.uid, nome, email }
     });
 
   } catch (error) {
     console.error('Erro ao criar usuário:', error);
-    
-    // Tratamento de erros específicos do Firebase
-    if (error.code === 'auth/email-already-exists') {
-      return reply.status(409).send({
-        success: false,
-        message: 'Este email já está cadastrado no sistema'
-      });
-    }
-    
-    if (error.code === 'auth/invalid-email') {
-      return reply.status(400).send({
-        success: false,
-        message: 'Email inválido'
-      });
-    }
-    
-    if (error.code === 'auth/weak-password') {
-      return reply.status(400).send({
-        success: false,
-        message: 'Senha muito fraca'
-      });
-    }
+    if (error.code === 'auth/email-already-exists') return reply.status(409).send({ success: false, message: 'Este email já está cadastrado no sistema' });
+    if (error.code === 'auth/invalid-email') return reply.status(400).send({ success: false, message: 'Email inválido' });
+    if (error.code === 'auth/weak-password') return reply.status(400).send({ success: false, message: 'Senha muito fraca' });
 
-    return reply.status(500).send({
-      success: false,
-      message: 'Erro ao criar usuário',
-      error: error.message
-    });
+    return reply.status(500).send({ success: false, message: 'Erro ao criar usuário', error: error.message });
   }
 });
 
-// LOGIN
+// POST - LOGIN
 app.post('/auth/login', async (req, reply) => {
   try {
     const { email, password } = req.body;
+    if (!email || !password) return reply.status(400).send({ success: false, message: 'Email e senha são obrigatórios' });
 
-    if (!email || !password) {
-      return reply.status(400).send({
-        success: false,
-        message: 'Email e senha são obrigatórios'
-      });
-    }
-
-    // Buscar usuário no Firestore
     const usuariosRef = db.collection('usuarios');
     const snapshot = await usuariosRef.where('email', '==', email).get();
-
-    if (snapshot.empty) {
-      return reply.status(401).send({
-        success: false,
-        message: 'Email ou senha incorretos'
-      });
-    }
+    if (snapshot.empty) return reply.status(401).send({ success: false, message: 'Email ou senha incorretos' });
 
     const usuarioDoc = snapshot.docs[0];
     const usuario = usuarioDoc.data();
 
-    // Verificar usuário no Firebase Auth
     const userRecord = await auth.getUserByEmail(email);
-
-    // Criar custom token para o cliente fazer login
     const customToken = await auth.createCustomToken(userRecord.uid);
 
     return reply.status(200).send({
       success: true,
       message: 'Login realizado com sucesso',
       token: customToken,
-      usuario: {
-        uid: usuario.uid,
-        nome: usuario.nome,
-        email: usuario.email
-      }
+      usuario: { uid: usuario.uid, nome: usuario.nome, email: usuario.email }
     });
 
   } catch (error) {
     console.error('Erro ao fazer login:', error);
-    
-    return reply.status(401).send({
-      success: false,
-      message: 'Email ou senha incorretos'
-    });
+    return reply.status(401).send({ success: false, message: 'Email ou senha incorretos' });
   }
 });
 
-// UPDATE
+// PUT - UPDATE PROFILE
 app.put('/auth/profile/:uid', async (req, reply) => {
   try {
     const { uid } = req.params;
     const { nome, telefone, fotoPerfil } = req.body;
 
-    // Verificar se usuário existe
     const usuarioRef = db.collection('usuarios').doc(uid);
     const doc = await usuarioRef.get();
+    if (!doc.exists) return reply.status(404).send({ success: false, message: 'Usuário não encontrado' });
 
-    if (!doc.exists) {
-      return reply.status(404).send({
-        success: false,
-        message: 'Usuário não encontrado'
-      });
-    }
-
-    // Dados para atualizar
-    const updateData = {
-      atualizarPerfilDados: new Date()
-    };
-
+    const updateData = { atualizarPerfilDados: new Date() };
     if (nome) updateData.nome = nome;
     if (telefone) updateData.telefone = telefone;
     if (fotoPerfil) updateData.fotoPerfil = fotoPerfil;
 
     await usuarioRef.update(updateData);
 
-    // Atualizar também no Firebase Auth se nome mudou
-    if (nome) {
-      await auth.updateUser(uid, {
-        displayName: nome
-      });
-    }
+    if (nome) await auth.updateUser(uid, { displayName: nome });
 
-    return reply.status(200).send({
-      success: true,
-      message: 'Perfil atualizado com sucesso'
-    });
+    return reply.status(200).send({ success: true, message: 'Perfil atualizado com sucesso' });
 
   } catch (error) {
     console.error('Erro ao atualizar perfil:', error);
-    return reply.status(500).send({
-      success: false,
-      message: 'Erro ao atualizar perfil'
-    });
+    return reply.status(500).send({ success: false, message: 'Erro ao atualizar perfil' });
   }
 });
 
-// DELETE
+// DELETE - DELETE ACCOUNT
 app.delete('/auth/delete/:uid', async (req, reply) => {
   try {
     const { uid } = req.params;
 
-    // Deletar do Firebase Authentication
     await auth.deleteUser(uid);
-
-    // Deletar do Firestore
     await db.collection('usuarios').doc(uid).delete();
 
-    // Opcional: Deletar dados relacionados (conversas, histórico, etc)
-    const conversasSnapshot = await db.collection('conversas')
-      .where('usuarioId', '==', uid)
-      .get();
-    
+    const conversasSnapshot = await db.collection('conversas').where('usuarioId', '==', uid).get();
     const batch = db.batch();
-    conversasSnapshot.docs.forEach(doc => {
-      batch.delete(doc.ref);
-    });
+    conversasSnapshot.docs.forEach(doc => batch.delete(doc.ref));
     await batch.commit();
 
-    return reply.status(200).send({
-      success: true,
-      message: 'Conta deletada com sucesso'
-    });
+    return reply.status(200).send({ success: true, message: 'Conta deletada com sucesso' });
 
   } catch (error) {
     console.error('Erro ao deletar conta:', error);
-    return reply.status(500).send({
-      success: false,
-      message: 'Erro ao deletar conta'
-    });
+    return reply.status(500).send({ success: false, message: 'Erro ao deletar conta' });
   }
 });
 
+// ===================================================
+// Função de processamento de imagem (Moondream)
+// ===================================================
 async function processImage(imagePath, userPrompt) {
   const apiKey = process.env.MOONDREAM_API_KEY;
   if (!apiKey) throw new Error("API Key não encontrada!");
@@ -304,93 +205,73 @@ async function processImage(imagePath, userPrompt) {
   const model = new vl({ apiKey });
   const encodedImage = await fs.readFile(imagePath);
 
-  const captionResult = await model.query({
-    image: encodedImage,
-    question: translatedPrompt.text,
-  });
-  
-  let finalAnswer;
+  const captionResult = await model.query({ image: encodedImage, question: translatedPrompt.text });
 
-  if (typeof captionResult.answer === 'string') {
-    finalAnswer = captionResult.answer;
-  } else {
+  let finalAnswer;
+  if (typeof captionResult.answer === 'string') finalAnswer = captionResult.answer;
+  else {
     let assembledAnswer = '';
-    for await (const chunk of captionResult.answer) {
-      assembledAnswer += chunk;
-    }
+    for await (const chunk of captionResult.answer) assembledAnswer += chunk;
     finalAnswer = assembledAnswer;
   }
 
   console.log(`Resposta completa do Moondream: "${finalAnswer}"`);
-  
   const translatedAnswer = await translate(finalAnswer, { to: 'pt' });
   return translatedAnswer.text;
 }
 
+// POST - UPLOAD
 app.post('/upload', async (req, reply) => {
-  let fileBuffer = null;
-  let userPrompt = 'Descreva a imagem.';
-  let originalFilename = `upload-${Date.now()}`;
+  let fileBuffer = null;
+  let userPrompt = 'Descreva a imagem.';
+  let originalFilename = `upload-${Date.now()}`;
 
-  const parts = req.parts();
-  try {
-    for await (const part of parts) {
-      if (part.type === 'file') {
-        fileBuffer = await part.toBuffer();
-        // Use o nome do arquivo que o frontend enviou ('photo.jpg')
-        // Dando a ele um nome único para evitar sobreposições
-        const timestamp = Date.now();
-        originalFilename = `${timestamp}-${part.filename}`;
-      } else if (part.type === 'field' && part.fieldname === 'prompt') {
-        userPrompt = part.value;
-      }
-    }
-  } catch (error) {
-    console.error('Erro ao processar multipart form:', error);
-    return reply.status(500).send({ error: 'Erro ao processar os dados enviados.' });
-  }
+  const parts = req.parts();
+  try {
+    for await (const part of parts) {
+      if (part.type === 'file') {
+        fileBuffer = await part.toBuffer();
+        const timestamp = Date.now();
+        originalFilename = `${timestamp}-${part.filename}`;
+      } else if (part.type === 'field' && part.fieldname === 'prompt') {
+        userPrompt = part.value;
+      }
+    }
+  } catch (error) {
+    console.error('Erro ao processar multipart form:', error);
+    return reply.status(500).send({ error: 'Erro ao processar os dados enviados.' });
+  }
 
-  if (!fileBuffer) {
-    return reply.status(400).send({ error: 'Nenhuma imagem foi enviada.' });
-  }
+  if (!fileBuffer) return reply.status(400).send({ error: 'Nenhuma imagem foi enviada.' });
 
-  // O nome do arquivo agora é único, ex: '1678886400000-photo.jpg'
-  const filePath = path.join(uploadDir, originalFilename);
+  const filePath = path.join(uploadDir, originalFilename);
 
-  try {
-    // ==========================================================
-    // AQUI ESTÁ A CORREÇÃO PRINCIPAL
-    // Garante que a pasta 'uploads' exista ANTES de tentar escrever
-    // ==========================================================
-    await fs.mkdir(uploadDir, { recursive: true });
+  try {
+    await fs.mkdir(uploadDir, { recursive: true });
+    await fs.writeFile(filePath, fileBuffer);
 
-    // Agora o writeFile vai funcionar
-    await fs.writeFile(filePath, fileBuffer);
+    const descriptionText = await processImage(filePath, userPrompt);
+    reply.send({ description: descriptionText });
 
-    // 1. Processa a imagem para obter a descrição em texto
-    const descriptionText = await processImage(filePath, userPrompt);
+  } catch (error) {
+    let errorMessage = 'Erro ao processar a imagem.';
+    if (error instanceof Error) errorMessage = error.message;
+    console.error('Erro ao processar a requisição:', errorMessage);
+    reply.status(500).send({ error: 'Erro ao processar a imagem: ' + errorMessage });
 
-    // 2. Envia o texto de volta como uma resposta JSON
-    reply.send({ description: descriptionText });
-
-  } catch (error) {
-    let errorMessage = 'Erro ao processar a imagem.';
-    if (error instanceof Error) {
-      errorMessage = error.message;
-    }
-    console.error('Erro ao processar a requisição:', errorMessage);
-    reply.status(500).send({ error: 'Erro ao processar a imagem: ' + errorMessage });
-  
-  } finally {
-    // Apaga o arquivo de imagem temporário
-    fs.unlink(filePath).catch(err => console.error('Erro ao remover arquivo de imagem:', err));
-  }
+  } finally {
+    fs.unlink(filePath).catch(err => console.error('Erro ao remover arquivo de imagem:', err));
+  }
 });
 
+// ===================================================
+// Handler para Vercel
+// ===================================================
 export default async function handler(req, res) {
   await app.ready();
   app.server.emit('request', req, res);
 }
+
 console.log(`\n📋 Endpoints disponíveis:`);
 console.log(`   POST /auth/register - Criar usuário`);
 console.log(`   POST /auth/login - Fazer login`);
