@@ -46,20 +46,15 @@ function buildApp() {
     bodyLimit: 5 * 1024 * 1024
   });
 
+  // ✅ CORS configurado corretamente
   app.register(cors, { 
-    origin: true,
+    origin: true, // Aceita qualquer origem dinamicamente
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
-  });
-
-  app.options('/upload', async (req, reply) => {
-  reply
-    .header('Access-Control-Allow-Origin', '*')
-    .header('Access-Control-Allow-Methods', 'POST, OPTIONS')
-    .header('Access-Control-Allow-Headers', 'Content-Type')
-    .status(204)
-    .send();
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    exposedHeaders: ['Content-Length', 'X-Request-Id'],
+    preflightContinue: false,
+    optionsSuccessStatus: 204
   });
 
   app.register(multipart, { 
@@ -70,8 +65,9 @@ function buildApp() {
     attachFieldsToBody: false
   });
 
+  // Hooks para debug
   app.addHook('onRequest', async (request, reply) => {
-    console.log(`${request.method} ${request.url}`);
+    console.log(`📥 ${request.method} ${request.url}`);
   });
 
   app.addHook('onSend', async (request, reply) => {
@@ -83,7 +79,8 @@ function buildApp() {
     return { 
       status: 'ok', 
       message: 'AcessiVision API',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      version: '1.0.0'
     };
   });
 
@@ -310,44 +307,64 @@ function buildApp() {
     let originalFilename = `upload-${Date.now()}`;
 
     try {
+      console.log('📸 [Upload] Recebendo requisição...');
+      
       reply.header('Access-Control-Allow-Origin', '*');
 
       const parts = req.parts();
+      let partCount = 0;
       
       for await (const part of parts) {
+        partCount++;
+        console.log(`📦 [Upload] Part ${partCount}: type=${part.type}, field=${part.fieldname}`);
+        
         if (part.type === 'file') {
           fileBuffer = await part.toBuffer();
+          console.log(`📁 [Upload] Arquivo: ${part.filename} (${fileBuffer.length} bytes)`);
           const timestamp = Date.now();
           originalFilename = `${timestamp}-${part.filename}`;
         } else if (part.type === 'field' && part.fieldname === 'prompt') {
           userPrompt = part.value;
+          console.log(`💬 [Upload] Prompt: "${userPrompt}"`);
         }
       }
 
       if (!fileBuffer) {
+        console.error('❌ [Upload] Nenhum arquivo foi enviado');
         return reply.status(400).send({ 
-          error: 'Nenhuma imagem foi enviada.' 
+          success: false,
+          error: 'Nenhuma imagem foi enviada.',
+          receivedParts: partCount
         });
       }
+
+      console.log('✅ [Upload] Arquivo recebido com sucesso');
 
       // Criar diretório temporário
       await fs.mkdir(uploadDir, { recursive: true });
       
       const filePath = path.join(uploadDir, originalFilename);
       await fs.writeFile(filePath, fileBuffer);
+      console.log(`💾 [Upload] Arquivo salvo: ${filePath}`);
 
+      console.log('🤖 [Upload] Processando com Moondream...');
       const descriptionText = await processImage(filePath, userPrompt);
+      console.log(`✨ [Upload] Descrição: "${descriptionText}"`);
       
       // Remover arquivo temporário
       await fs.unlink(filePath).catch(err => 
-        console.error('Erro ao remover arquivo:', err)
+        console.error('⚠️ [Upload] Erro ao remover arquivo:', err)
       );
 
-      return reply.send({ description: descriptionText });
+      return reply.send({ 
+        success: true,
+        description: descriptionText 
+      });
 
     } catch (error) {
-      console.error('Erro ao processar imagem:', error);
+      console.error('❌ [Upload] Erro:', error);
       return reply.status(500).send({ 
+        success: false,
         error: 'Erro ao processar a imagem: ' + error.message 
       });
     }
@@ -364,9 +381,9 @@ async function processImage(imagePath, userPrompt) {
     throw new Error("MOONDREAM_API_KEY não encontrada!");
   }
 
-  console.log(`Traduzindo prompt: "${userPrompt}"`);
+  console.log(`🌐 Traduzindo prompt: "${userPrompt}"`);
   const translatedPrompt = await translate(userPrompt, { from: 'pt', to: 'en' });
-  console.log(`Prompt traduzido: "${translatedPrompt.text}"`);
+  console.log(`🌐 Prompt traduzido: "${translatedPrompt.text}"`);
 
   const model = new vl({ apiKey });
   const encodedImage = await fs.readFile(imagePath);
@@ -387,8 +404,9 @@ async function processImage(imagePath, userPrompt) {
     finalAnswer = assembledAnswer;
   }
 
-  console.log(`Resposta do Moondream: "${finalAnswer}"`);
+  console.log(`🤖 Resposta do Moondream: "${finalAnswer}"`);
   const translatedAnswer = await translate(finalAnswer, { to: 'pt' });
+  console.log(`🌐 Resposta traduzida: "${translatedAnswer.text}"`);
   
   return translatedAnswer.text;
 }
