@@ -42,17 +42,40 @@ const uploadDir = '/tmp/uploads';
 function buildApp() {
   const app = Fastify({ 
     logger: process.env.NODE_ENV !== 'production',
-    trustProxy: true 
+    trustProxy: true,
+    bodyLimit: 5 * 1024 * 1024
   });
 
   app.register(cors, { 
-  origin: '*', // aceita qualquer origem
+    origin: true,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
+  });
+
+  app.options('/upload', async (req, reply) => {
+  reply
+    .header('Access-Control-Allow-Origin', '*')
+    .header('Access-Control-Allow-Methods', 'POST, OPTIONS')
+    .header('Access-Control-Allow-Headers', 'Content-Type')
+    .status(204)
+    .send();
   });
 
   app.register(multipart, { 
     limits: { 
-      fileSize: 1024 * 1024 * 5 // 5MB
-    } 
+      fileSize: 5 * 1024 * 1024, // 5MB
+      files: 1
+    },
+    attachFieldsToBody: false
+  });
+
+  app.addHook('onRequest', async (request, reply) => {
+    console.log(`${request.method} ${request.url}`);
+  });
+
+  app.addHook('onSend', async (request, reply) => {
+    reply.header('Access-Control-Allow-Origin', '*');
   });
 
   // Health check
@@ -287,6 +310,8 @@ function buildApp() {
     let originalFilename = `upload-${Date.now()}`;
 
     try {
+      reply.header('Access-Control-Allow-Origin', '*');
+
       const parts = req.parts();
       
       for await (const part of parts) {
