@@ -300,42 +300,70 @@ function buildApp() {
     }
   });
 
-  // POST - UPLOAD
+  // POST - UPLOAD (suporta FormData E base64)
   app.post('/upload', async (req, reply) => {
     let fileBuffer = null;
     let userPrompt = 'Descreva a imagem.';
-    let originalFilename = `upload-${Date.now()}`;
+    let originalFilename = `upload-${Date.now()}.jpg`;
 
     try {
       console.log('📸 [Upload] Recebendo requisição...');
+      console.log('📋 [Upload] Content-Type:', req.headers['content-type']);
       
       reply.header('Access-Control-Allow-Origin', '*');
 
-      const parts = req.parts();
-      let partCount = 0;
-      
-      for await (const part of parts) {
-        partCount++;
-        console.log(`📦 [Upload] Part ${partCount}: type=${part.type}, field=${part.fieldname}`);
+      // MÉTODO 1: JSON com base64 (para React Native)
+      if (req.headers['content-type']?.includes('application/json')) {
+        console.log('📦 [Upload] Formato: JSON com base64');
         
-        if (part.type === 'file') {
-          fileBuffer = await part.toBuffer();
-          console.log(`📁 [Upload] Arquivo: ${part.filename} (${fileBuffer.length} bytes)`);
-          const timestamp = Date.now();
-          originalFilename = `${timestamp}-${part.filename}`;
-        } else if (part.type === 'field' && part.fieldname === 'prompt') {
-          userPrompt = part.value;
-          console.log(`💬 [Upload] Prompt: "${userPrompt}"`);
+        const { image, prompt } = req.body;
+        
+        if (!image) {
+          return reply.status(400).send({ 
+            success: false,
+            error: 'Nenhuma imagem foi enviada (campo "image" ausente).'
+          });
         }
-      }
 
-      if (!fileBuffer) {
-        console.error('❌ [Upload] Nenhum arquivo foi enviado');
-        return reply.status(400).send({ 
-          success: false,
-          error: 'Nenhuma imagem foi enviada.',
-          receivedParts: partCount
-        });
+        if (prompt) {
+          userPrompt = prompt;
+        }
+
+        // Converter base64 para buffer
+        fileBuffer = Buffer.from(image, 'base64');
+        console.log(`📁 [Upload] Imagem base64 recebida (${fileBuffer.length} bytes)`);
+        console.log(`💬 [Upload] Prompt: "${userPrompt}"`);
+      } 
+      // MÉTODO 2: FormData (para web/Postman)
+      else {
+        console.log('📦 [Upload] Formato: FormData');
+        
+        const parts = req.parts();
+        let partCount = 0;
+        
+        for await (const part of parts) {
+          partCount++;
+          console.log(`📦 [Upload] Part ${partCount}: type=${part.type}, field=${part.fieldname}`);
+          
+          if (part.type === 'file') {
+            fileBuffer = await part.toBuffer();
+            console.log(`📁 [Upload] Arquivo: ${part.filename} (${fileBuffer.length} bytes)`);
+            const timestamp = Date.now();
+            originalFilename = `${timestamp}-${part.filename}`;
+          } else if (part.type === 'field' && part.fieldname === 'prompt') {
+            userPrompt = part.value;
+            console.log(`💬 [Upload] Prompt: "${userPrompt}"`);
+          }
+        }
+
+        if (!fileBuffer) {
+          console.error('❌ [Upload] Nenhum arquivo foi enviado');
+          return reply.status(400).send({ 
+            success: false,
+            error: 'Nenhuma imagem foi enviada.',
+            receivedParts: partCount
+          });
+        }
       }
 
       console.log('✅ [Upload] Arquivo recebido com sucesso');
