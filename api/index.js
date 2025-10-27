@@ -46,10 +46,9 @@ function buildApp() {
   });
 
   app.register(cors, { 
-    origin: process.env.CORS_ORIGIN || '*',
-    credentials: true 
+  origin: '*', // aceita qualquer origem
   });
-  
+
   app.register(multipart, { 
     limits: { 
       fileSize: 1024 * 1024 * 5 // 5MB
