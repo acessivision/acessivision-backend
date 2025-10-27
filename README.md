@@ -1,121 +1,502 @@
 # AcessiVision Backend
 
-## Descrição
-AcessiVision é um projeto de backend desenvolvido em Node.js que processa imagens enviadas por usuários. O servidor utiliza a API do Moondream para gerar legendas curtas (captions) descritivas das imagens, traduz essas legendas para o português usando a biblioteca @iamtraction/google-translate, converte o texto traduzido em áudio MP3 com a biblioteca gtts (Google Text-to-Speech) e retorna o arquivo de áudio como resposta.
+## 📋 Descrição
 
-O foco é acessibilidade para auxiliar pessoas com deficiências visuais, transformando imagens em descrições audíveis. O servidor é construído com o framework Fastify para alta performance e suporta uploads de imagens com limite de 5MB.
+Este projeto é uma API backend do AcessiVision desenvolvida em Node.js com Fastify que oferece funcionalidades de processamento de imagens com IA e gerenciamento de usuários. O projeto utiliza a API do Moondream para análise e descrição de imagens, tradução automática para português e integração com Firebase para autenticação e armazenamento de dados.
 
-## Requisitos
-- Node.js: Versão 14 ou superior (recomendado, baseado nas dependências).
-- npm: Gerenciador de pacotes do Node.js.
-- API Key do Moondream: Necessária para acessar a API de geração de legendas.
-- Conexão com internet: Para chamadas à API do Мооndream e tradução via Google Translate.
+O foco principal é promover **acessibilidade**, auxiliando pessoas com deficiências visuais através da transformação de imagens em descrições textuais detalhadas.
 
-## Instalação
-Siga os passos abaixo para clonar e configurar o projeto localmente:
+## 🚀 Tecnologias
 
-1. Clone o repositório:
-```
+- **Node.js** - Runtime JavaScript
+- **Fastify** - Framework web de alta performance
+- **Firebase Admin** - Autenticação e Firestore
+- **Moondream** - API de visão computacional para análise de imagens
+- **Google Translate** - Tradução automática de textos
+- **Vercel** - Plataforma de deploy serverless
+
+## 📦 Requisitos
+
+- Node.js 18 ou superior
+- npm ou yarn
+- Conta Firebase com projeto configurado
+- API Key do Moondream
+- Conta Vercel (para deploy em produção)
+
+## 🔧 Instalação
+
+1. **Clone o repositório:**
+```bash
 git clone https://github.com/acessivision/acessivision-backend.git
-```
-
-2. Entre no diretório do projeto:
-```
 cd acessivision-backend
 ```
 
-3. Instale as dependências:
-```
+2. **Instale as dependências:**
+```bash
 npm install
 ```
-Isso instalará todas as dependências listadas no package.json, incluindo Fastify, Moondream, gTTS e outras.
 
+3. **Configure as variáveis de ambiente:**
 
-## Configuração
-Crie um arquivo .env na raiz do projeto e adicione a chave da API do Moondream:
-```
-MOONDREAM_API_KEY=API_KEY_AQUI
-```
+Crie um arquivo `.env` na raiz do projeto com as seguintes variáveis:
 
-## Executando o Servidor
-Inicie o servidor com o comando:
-```
-node server.js
-```
-O servidor rodará na porta definida (padrão: 3000) e estará acessível em http://localhost:3000. Mensagem de log: Servidor rodando na porta 3000.
+```env
+# Moondream API
+MOONDREAM_API_KEY=sua_chave_api_moondream
 
-Modo de desenvolvimento: Use nodemon para reinício automático (instale globalmente: npm install -g nodemon e rode nodemon server.js).
-Produção: Restrinja o CORS (atualmente configurado como origin: '*' para desenvolvimento).
+# Firebase Admin
+FIREBASE_PROJECT_ID=seu_project_id
+FIREBASE_CLIENT_EMAIL=seu_client_email
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 
-## Endpoints da API
-O servidor expõe um único endpoint principal:
-```
-POST /upload
-```
-- Descrição: Recebe uma imagem via multipart/form-data, processa-a para gerar uma legenda curta, traduz para português, converte em áudio e retorna o arquivo MP3.
-- Parâmetros: Arquivo de imagem (obrigatório): Envie como campo file no formulário multipart. Limite: 5MB. Formatos suportados: Qualquer imagem legível pelo Moondream (ex: JPG, PNG).
+# CORS (opcional)
+CORS_ORIGIN=*
 
-### Resposta:
-- Sucesso (200 OK): Arquivo de áudio MP3 com o Content-Type audio/mpeg.
-- Erro (400 Bad Request): Se nenhuma imagem for enviada.
-- Erro (500 Internal Server Error): Em caso de falha no processamento (ex: API Key inválida, erro na tradução ou conversão).
-
-
-### Fluxo de Processamento:
-- A imagem é salva temporariamente na pasta uploads/.
-- Geração de legenda: Usa moondream.caption com opção length: "short" para uma descrição concisa.
-- Tradução: Converte a legenda para português via Google Translate.
-- Conversão para áudio: Usa gtts para gerar MP3 em português.
-- Retorno: Envia o áudio e remove arquivos temporários (imagem e áudio).
-
-
-Exemplo de Requisição (usando curl):
-```
-curl -X POST http://localhost:3000/upload -F "file=@caminho/para/imagem.jpg" --output audio.mp3
+# Ambiente
+NODE_ENV=development
 ```
 
-## Dependências
-As dependências do projeto estão listadas no package.json.
-Para atualizar dependências: 
+## 🏃 Executando o Servidor
+
+### Modo Desenvolvimento
+```bash
+npm run dev
 ```
-npm update
+
+### Modo Produção Local
+```bash
+npm start
 ```
 
-## Estrutura de Arquivos
+O servidor estará disponível em `http://localhost:3000` (ou porta configurada).
 
-- README: 
-  - Instruções básicas de instalação e execução (em português).
-- .gitignore: 
-  - Ignora pastas e arquivos sensíveis:
-- node_modules/: 
-  - Dependências instaladas.
-- .env: 
-  - Variáveis de ambiente.
-- uploads/: 
- -  Pasta temporária de uploads.
-- Arquivos de log: 
-  - *.log, npm-debug.log, etc.
-- Arquivos de SO/Editores: 
-  - .DS_Store, Thumbs.db.
+## 📚 Documentação da API
 
-- server.js: 
-  - Código principal do servidor: 
-  - Importa módulos e configura Fastify.
-  - Cria pasta uploads/ se necessário.
-  - Define funções: processImage (gera legenda e traduz) e textToAudi (converte texto em áudio).
-  - Endpoint /upload: Processa upload, gera áudio e limpa arquivos.
-  - Escuta na porta configurada.
+### Base URL
+```
+Local: http://localhost:3000
+Produção: https://acessivision.com.br
+```
 
-- package.json: 
-  - Metadados do projeto, dependências e configuração de módulos.
-- package-lock.json: 
-  - Lockfile para reproducibilidade das dependências.
+> 🌐 **A API está hospedada e disponível em:** [https://acessivision.com.br](https://acessivision.com.br)
 
-## Problemas Comuns e Soluções
+---
 
-- Erro "API Key não encontrada!": Verifique se MOONDREAM_API_KEY está no .env.
-- Falha no Upload: Certifique-se de que a pasta uploads/ tem permissões de escrita.
-- Tradução Falhando: Verifique conexão com internet ou limites da API Google Translate.
-- Áudio Não Gerado: Instale dependências corretamente e teste gtts isoladamente.
+## 🔐 Endpoints de Autenticação
 
-Para mais detalhes, consulte o código fonte ou o repositório original: https://github.com/acessivision/acessivision-backend.
+### 1. Health Check
+Verifica o status da API.
+
+**Endpoint:** `GET /`
+
+**Resposta de Sucesso (200):**
+```json
+{
+  "status": "ok",
+  "message": "AcessiVision API",
+  "timestamp": "2025-10-26T12:00:00.000Z"
+}
+```
+
+---
+
+### 2. Registrar Usuário
+Cria uma nova conta de usuário no sistema.
+
+**Endpoint:** `POST /auth/register`
+
+**Body (JSON):**
+```json
+{
+  "email": "usuario@example.com",
+  "password": "senha123",
+  "nome": "Nome do Usuário"
+}
+```
+
+**Validações:**
+- Email deve ser válido
+- Senha deve ter no mínimo 6 caracteres
+- Todos os campos são obrigatórios
+
+**Resposta de Sucesso (201):**
+```json
+{
+  "success": true,
+  "message": "Usuário criado com sucesso",
+  "usuario": {
+    "uid": "firebase_user_id",
+    "nome": "Nome do Usuário",
+    "email": "usuario@example.com"
+  }
+}
+```
+
+**Respostas de Erro:**
+- **400** - Dados inválidos ou incompletos
+- **409** - Email já cadastrado
+- **500** - Erro interno do servidor
+
+---
+
+### 3. Login
+Autentica um usuário existente.
+
+**Endpoint:** `POST /auth/login`
+
+**Body (JSON):**
+```json
+{
+  "email": "usuario@example.com",
+  "password": "senha123"
+}
+```
+
+**Resposta de Sucesso (200):**
+```json
+{
+  "success": true,
+  "message": "Login realizado com sucesso",
+  "token": "custom_firebase_token",
+  "usuario": {
+    "uid": "firebase_user_id",
+    "nome": "Nome do Usuário",
+    "email": "usuario@example.com"
+  }
+}
+```
+
+**Respostas de Erro:**
+- **400** - Email ou senha não fornecidos
+- **401** - Credenciais inválidas
+- **500** - Erro interno do servidor
+
+---
+
+### 4. Atualizar Perfil
+Atualiza informações do perfil do usuário.
+
+**Endpoint:** `PUT /auth/profile/:uid`
+
+**Parâmetros de URL:**
+- `uid` - ID do usuário no Firebase
+
+**Body (JSON):**
+```json
+{
+  "nome": "Novo Nome",
+  "telefone": "+5511999999999",
+  "fotoPerfil": "https://url-da-foto.com/foto.jpg"
+}
+```
+
+**Nota:** Todos os campos são opcionais. Envie apenas os que deseja atualizar.
+
+**Resposta de Sucesso (200):**
+```json
+{
+  "success": true,
+  "message": "Perfil atualizado com sucesso"
+}
+```
+
+**Respostas de Erro:**
+- **404** - Usuário não encontrado
+- **500** - Erro ao atualizar perfil
+
+---
+
+### 5. Deletar Conta
+Remove permanentemente a conta do usuário e todos os dados associados.
+
+**Endpoint:** `DELETE /auth/delete/:uid`
+
+**Parâmetros de URL:**
+- `uid` - ID do usuário no Firebase
+
+**Resposta de Sucesso (200):**
+```json
+{
+  "success": true,
+  "message": "Conta deletada com sucesso"
+}
+```
+
+**Ações realizadas:**
+- Remove usuário do Firebase Authentication
+- Deleta documento do usuário no Firestore
+- Remove todas as conversas associadas ao usuário
+
+**Respostas de Erro:**
+- **500** - Erro ao deletar conta
+
+---
+
+## 🖼️ Endpoint de Processamento de Imagens
+
+### 6. Upload e Análise de Imagem
+Processa uma imagem enviada, gera uma descrição usando IA e traduz para português.
+
+**Endpoint:** `POST /upload`
+
+**Content-Type:** `multipart/form-data`
+
+**Parâmetros:**
+- `file` (obrigatório) - Arquivo de imagem (máximo 5MB)
+- `prompt` (opcional) - Instrução customizada para análise da imagem
+  - Padrão: "Descreva a imagem."
+
+**Formatos suportados:** JPG, JPEG, PNG, WebP, GIF
+
+**Exemplo de Requisição (cURL):**
+```bash
+# Local
+curl -X POST http://localhost:3000/upload \
+  -F "file=@caminho/para/imagem.jpg" \
+  -F "prompt=Descreva os objetos presentes na imagem"
+
+# Produção
+curl -X POST https://acessivision.com.br/upload \
+  -F "file=@caminho/para/imagem.jpg" \
+  -F "prompt=Descreva os objetos presentes na imagem"
+```
+
+**Exemplo de Requisição (JavaScript/Fetch):**
+```javascript
+const formData = new FormData();
+formData.append('file', imageFile);
+formData.append('prompt', 'Descreva a imagem em detalhes');
+
+const response = await fetch('https://acessivision.com.br/upload', {
+  method: 'POST',
+  body: formData
+});
+
+const data = await response.json();
+console.log(data.description);
+```
+
+**Resposta de Sucesso (200):**
+```json
+{
+  "description": "Uma paisagem montanhosa com céu azul e nuvens brancas ao fundo. Em primeiro plano há árvores verdes."
+}
+```
+
+**Fluxo de Processamento:**
+1. Upload da imagem para diretório temporário (`/tmp/uploads`)
+2. Tradução do prompt de PT → EN
+3. Análise da imagem via Moondream API
+4. Tradução da resposta de EN → PT
+5. Limpeza de arquivos temporários
+6. Retorno da descrição
+
+**Respostas de Erro:**
+- **400** - Nenhuma imagem foi enviada
+- **500** - Erro ao processar a imagem
+
+---
+
+## 📁 Estrutura do Projeto
+
+```
+acessivision-backend/
+├── api/
+│   └── index.js              # Código principal do servidor
+├── node_modules/             # Dependências (ignorado pelo git)
+├── uploads/                  # Pasta temporária (ignorada pelo git)
+├── .env                      # Variáveis de ambiente (ignorado pelo git)
+├── .gitignore               # Arquivos ignorados pelo Git
+├── package.json             # Dependências e scripts
+├── package-lock.json        # Lockfile de dependências
+├── README.md                # Documentação (este arquivo)
+└── vercel.json              # Configuração do Vercel
+```
+
+---
+
+## 🔒 Segurança
+
+- **Validação de entrada:** Todos os endpoints validam dados recebidos
+- **Autenticação Firebase:** Utiliza Firebase Admin SDK para segurança
+- **CORS configurável:** Ajuste `CORS_ORIGIN` no `.env` para produção
+- **Limite de upload:** Máximo de 5MB por arquivo
+- **Trust Proxy:** Configurado para funcionar atrás de proxies reversos
+
+---
+
+## 🗄️ Banco de Dados (Firestore)
+
+### Coleção `usuarios`
+```javascript
+{
+  uid: string,                    // ID do Firebase Auth
+  nome: string,                   // Nome do usuário
+  email: string,                  // Email
+  dataEnvio: Timestamp,          // Data de registro
+  dataCriacao: Timestamp,        // Data de criação
+  autenticarEmail: boolean,      // Email verificado
+  criarContaManual: boolean,     // Conta criada manualmente
+  atualizarPerfilDados: Timestamp, // Última atualização
+  fotoPerfil: string | null,     // URL da foto
+  telefone: string | null,       // Telefone
+  configuracoes: {
+    notificacoes: boolean,
+    tema: string                  // 'system', 'light', 'dark'
+  }
+}
+```
+
+### Coleção `conversas`
+```javascript
+{
+  usuarioId: string,             // Referência ao usuário
+  timestamp: Timestamp,          // Data da conversa
+  // Outros campos conforme necessidade
+}
+```
+
+---
+
+## 🚀 Deploy no Vercel
+
+> ✅ **A API já está em produção!** Acesse: [https://acessivision.com.br](https://acessivision.com.br)
+
+### Para fazer seu próprio deploy:
+
+1. **Instale a CLI do Vercel:**
+```bash
+npm install -g vercel
+```
+
+2. **Faça login:**
+```bash
+vercel login
+```
+
+3. **Deploy:**
+```bash
+vercel
+```
+
+4. **Configure as variáveis de ambiente no dashboard do Vercel:**
+   - Acesse o projeto no painel
+   - Vá em Settings → Environment Variables
+   - Adicione todas as variáveis do `.env`
+
+5. **Configure domínio customizado (opcional):**
+   - No painel do Vercel, vá em Settings → Domains
+   - Adicione seu domínio personalizado
+   - Configure os DNS conforme instruções
+
+---
+
+## 🧪 Testando a API
+
+### Teste com cURL
+
+**Health Check:**
+```bash
+# Local
+curl http://localhost:3000/
+
+# Produção
+curl https://acessivision.com.br/
+```
+
+**Registro:**
+```bash
+# Local
+curl -X POST http://localhost:3000/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"teste@example.com","password":"senha123","nome":"Teste"}'
+
+# Produção
+curl -X POST https://acessivision.com.br/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"teste@example.com","password":"senha123","nome":"Teste"}'
+```
+
+**Upload de Imagem:**
+```bash
+# Local
+curl -X POST http://localhost:3000/upload \
+  -F "file=@imagem.jpg" \
+  -F "prompt=Descreva esta imagem"
+
+# Produção
+curl -X POST https://acessivision.com.br/upload \
+  -F "file=@imagem.jpg" \
+  -F "prompt=Descreva esta imagem"
+```
+
+---
+
+## ⚠️ Problemas Comuns
+
+### Erro "MOONDREAM_API_KEY não encontrada"
+**Solução:** Verifique se a variável está corretamente definida no arquivo `.env`
+
+### Erro de permissão na pasta uploads
+**Solução:** Em ambiente Vercel, usa-se `/tmp/uploads` automaticamente
+
+### Erro de autenticação Firebase
+**Solução:** Verifique se as credenciais no `.env` estão corretas e se a chave privada está com `\n` escapado
+
+### Limite de upload excedido
+**Solução:** O limite é 5MB. Reduza o tamanho da imagem antes do upload
+
+---
+
+## 📝 Scripts Disponíveis
+
+```json
+{
+  "start": "node api/index.js",
+  "dev": "nodemon api/index.js",
+  "test": "echo \"No tests specified\" && exit 0"
+}
+```
+
+---
+
+## 🤝 Contribuindo
+
+1. Fork o projeto
+2. Crie uma branch para sua feature (`git checkout -b feature/NovaFuncionalidade`)
+3. Commit suas mudanças (`git commit -m 'Adiciona nova funcionalidade'`)
+4. Push para a branch (`git push origin feature/NovaFuncionalidade`)
+5. Abra um Pull Request
+
+---
+
+## 📄 Licença
+
+Este projeto está sob a licença MIT. Veja o arquivo `LICENSE` para mais detalhes.
+
+---
+
+## 👥 Autores
+
+**Equipe AcessiVision**
+
+- GitHub: [@acessivision](https://github.com/acessivision)
+
+---
+
+## 📞 Suporte
+
+Para reportar bugs ou sugerir melhorias, abra uma [issue no GitHub](https://github.com/acessivision/acessivision-backend/issues).
+
+---
+
+## 🙏 Agradecimentos
+
+- [Moondream](https://moondream.ai/) - API de visão computacional
+- [Firebase](https://firebase.google.com/) - Backend as a Service
+- [Fastify](https://www.fastify.io/) - Framework web
+- [Vercel](https://vercel.com/) - Plataforma de deploy
+
+---
+
+**Feito com ❤️ pela equipe AcessiVision**
