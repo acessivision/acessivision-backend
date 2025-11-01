@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
+import * as AbacatePayModule from "abacatepay-nodejs-sdk";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -35,8 +36,83 @@ try {
 const db = getFirestore();
 const auth = getAuth();
 
+// Inicializar AbacatePay
+const AbacatePay = AbacatePayModule?.default?.default 
+  || AbacatePayModule?.default 
+  || AbacatePayModule;
+
+console.log("🧩 Tipo do AbacatePay:", typeof AbacatePay);
+if (!process.env.ABACATEPAY_API_KEY) {
+  throw new Error("❌ ABACATEPAY_API_KEY não definida no .env");
+}
+const abacatepay = AbacatePay(process.env.ABACATEPAY_API_KEY);
+
 // Diretório temporário do Vercel
 const uploadDir = '/tmp/uploads';
+
+// ==========================================
+// MIDDLEWARE DE VERIFICAÇÃO PREMIUM
+// ==========================================
+async function verificarPremium(uid) {
+  try {
+    if (!uid) {
+      return {
+        isPremium: false,
+        plano: 'free',
+        error: 'UID não fornecido'
+      };
+    }
+
+    const usuarioRef = db.collection('usuarios').doc(uid);
+    const doc = await usuarioRef.get();
+
+    if (!doc.exists) {
+      return {
+        isPremium: false,
+        plano: 'free',
+        error: 'Usuário não encontrado'
+      };
+    }
+
+    const usuario = doc.data();
+    const plano = usuario.plano || 'free';
+    const expiracao = usuario.planoExpiracao;
+
+    // Verificar se é premium e se não expirou
+    const now = new Date();
+    const expiracaoDate = expiracao?.toDate ? expiracao.toDate() : null;
+    const isPremium = plano === 'premium' && expiracaoDate && expiracaoDate > now;
+
+    // Se expirou, downgrade para free
+    if (plano === 'premium' && (!expiracaoDate || expiracaoDate <= now)) {
+      await usuarioRef.update({
+        plano: 'free',
+        planoExpiracao: null,
+        atualizarPerfilDados: new Date()
+      });
+
+      return {
+        isPremium: false,
+        plano: 'free',
+        expirado: true
+      };
+    }
+
+    return {
+      isPremium,
+      plano,
+      expiracao: expiracaoDate
+    };
+
+  } catch (error) {
+    console.error('Erro ao verificar premium:', error);
+    return {
+      isPremium: false,
+      plano: 'free',
+      error: error.message
+    };
+  }
+}
 
 // Função para criar instância do Fastify
 function buildApp() {
@@ -48,7 +124,7 @@ function buildApp() {
 
   // ✅ CORS configurado corretamente
   app.register(cors, { 
-    origin: true, // Aceita qualquer origem dinamicamente
+    origin: true,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
@@ -59,7 +135,7 @@ function buildApp() {
 
   app.register(multipart, { 
     limits: { 
-      fileSize: 5 * 1024 * 1024, // 5MB
+      fileSize: 5 * 1024 * 1024,
       files: 1
     },
     attachFieldsToBody: false
@@ -74,6 +150,10 @@ function buildApp() {
     reply.header('Access-Control-Allow-Origin', '*');
   });
 
+  // ==========================================
+  // ROTAS BÁSICAS
+  // ==========================================
+
   // Health check
   app.get('/', async (req, reply) => {
     return { 
@@ -83,6 +163,10 @@ function buildApp() {
       version: '1.0.0'
     };
   });
+
+  // ==========================================
+  // ROTAS DE AUTENTICAÇÃO
+  // ==========================================
 
   // POST - REGISTER
   app.post('/auth/register', async (req, reply) => {
@@ -139,7 +223,9 @@ function buildApp() {
         atualizarPerfilDados: new Date(),
         fotoPerfil: null,
         telefone: null,
-        configuracoes: { notificacoes: true, tema: 'system' }
+        configuracoes: { notificacoes: true, tema: 'system' },
+        plano: 'free',
+        planoExpiracao: null
       };
 
       await db.collection('usuarios').doc(userRecord.uid).set(usuarioData);
@@ -300,6 +386,307 @@ function buildApp() {
     }
   });
 
+  // ==========================================
+  // ROTAS DE PLANOS E PAGAMENTO
+  // ==========================================
+
+  // GET - Listar planos disponíveis
+  app.get('/plans', async (req, reply) => {
+    try {
+      const plans = [
+        {
+          id: 'free',
+          nome: 'Gratuito',
+          preco: 0,
+          recursos: [
+            'Até 10 conversões por dia',
+            'Qualidade padrão de áudio',
+            'Histórico de 7 dias'
+          ],
+          ativo: true
+        },
+        {
+          id: 'premium',
+          nome: 'Premium',
+          preco: 20.00,
+          recursos: [
+            'Conversões ilimitadas',
+            'Qualidade HD de áudio',
+            'Histórico completo',
+            'Prioridade no processamento',
+            'Sem anúncios'
+          ],
+          ativo: true
+        }
+      ];
+
+      return reply.status(200).send({
+        success: true,
+        plans
+      });
+    } catch (error) {
+      console.error('Erro ao listar planos:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Erro ao listar planos'
+      });
+    }
+  });
+
+  // GET - Verificar plano atual do usuário
+  app.get('/user/:uid/plan', async (req, reply) => {
+    try {
+      const { uid } = req.params;
+
+      const usuarioRef = db.collection('usuarios').doc(uid);
+      const doc = await usuarioRef.get();
+
+      if (!doc.exists) {
+        return reply.status(404).send({
+          success: false,
+          message: 'Usuário não encontrado'
+        });
+      }
+
+      const usuario = doc.data();
+      const planoAtual = usuario.plano || 'free';
+      const dataExpiracao = usuario.planoExpiracao;
+
+      const expiracaoDate = dataExpiracao?.toDate ? dataExpiracao.toDate() : null;
+      const ativo = planoAtual === 'premium' && expiracaoDate && expiracaoDate > new Date();
+
+      return reply.status(200).send({
+        success: true,
+        plano: planoAtual,
+        expiracao: expiracaoDate,
+        ativo
+      });
+    } catch (error) {
+      console.error('Erro ao verificar plano:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Erro ao verificar plano'
+      });
+    }
+  });
+
+  // POST - Verificar se é premium
+  app.post('/user/verify-premium', async (req, reply) => {
+    try {
+      const { uid } = req.body;
+      const result = await verificarPremium(uid);
+      
+      return reply.status(200).send({
+        success: true,
+        ...result
+      });
+    } catch (error) {
+      return reply.status(500).send({
+        success: false,
+        message: 'Erro ao verificar premium'
+      });
+    }
+  });
+
+  // POST - Criar billing (PIX) para upgrade
+  app.post('/billing/create', async (req, reply) => {
+    try {
+      const { uid, planId } = req.body;
+
+      if (!uid || !planId) {
+        return reply.status(400).send({
+          success: false,
+          message: 'UID e planId são obrigatórios'
+        });
+      }
+
+      const usuarioRef = db.collection('usuarios').doc(uid);
+      const doc = await usuarioRef.get();
+
+      if (!doc.exists) {
+        return reply.status(404).send({
+          success: false,
+          message: 'Usuário não encontrado'
+        });
+      }
+
+      const usuario = doc.data();
+
+      if (planId !== 'premium') {
+        return reply.status(400).send({
+          success: false,
+          message: 'Plano inválido'
+        });
+      }
+
+      // Criar billing no AbacatePay
+      const billing = await abacatepay.billing.create({
+        frequency: 'once',
+        methods: ['PIX'],
+        products: [
+          {
+            externalId: 'premium-mensal',
+            name: 'Plano Premium - AcessiVision',
+            description: 'Acesso premium com recursos ilimitados por 30 dias',
+            quantity: 1,
+            price: 2000
+          }
+        ],
+        customer: {
+          email: usuario.email,
+          name: usuario.nome || 'Usuário AcessiVision',
+          cellphone: usuario.telefone || ''
+        },
+        metadata: {
+          uid: uid,
+          planId: planId,
+          tipo: 'upgrade'
+        }
+      });
+
+      // Salvar billing no Firestore
+      const billingRef = db.collection('billings').doc(billing.id);
+      await billingRef.set({
+        billingId: billing.id,
+        uid: uid,
+        planId: planId,
+        valor: 20.00,
+        status: 'pending',
+        metodoPagamento: 'PIX',
+        dataCriacao: new Date(),
+        dataAtualizacao: new Date()
+      });
+
+      return reply.status(201).send({
+        success: true,
+        message: 'Billing criado com sucesso',
+        billing: {
+          id: billing.id,
+          status: billing.status,
+          url: billing.url,
+          pix: {
+            qrCode: billing.methods?.pix?.qrCode || null,
+            qrCodeText: billing.methods?.pix?.qrCodeText || null
+          }
+        }
+      });
+
+    } catch (error) {
+      console.error('Erro ao criar billing:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Erro ao criar cobrança',
+        error: error.message
+      });
+    }
+  });
+
+  // POST - Webhook do AbacatePay
+  app.post('/webhook/abacatepay', async (req, reply) => {
+    try {
+      const event = req.body;
+
+      console.log('📨 Webhook recebido:', event);
+
+      if (event.kind === 'billing.paid') {
+        const billingId = event.data.id;
+        const metadata = event.data.metadata;
+
+        if (!metadata || !metadata.uid) {
+          console.error('❌ Metadata inválida no webhook');
+          return reply.status(400).send({ success: false });
+        }
+
+        const uid = metadata.uid;
+        const planId = metadata.planId;
+
+        // Atualizar billing no Firestore
+        const billingRef = db.collection('billings').doc(billingId);
+        await billingRef.update({
+          status: 'paid',
+          dataPagamento: new Date(),
+          dataAtualizacao: new Date()
+        });
+
+        // Atualizar plano do usuário
+        const usuarioRef = db.collection('usuarios').doc(uid);
+        const dataExpiracao = new Date();
+        dataExpiracao.setDate(dataExpiracao.getDate() + 30);
+
+        await usuarioRef.update({
+          plano: planId,
+          planoExpiracao: dataExpiracao,
+          atualizarPerfilDados: new Date()
+        });
+
+        console.log(`✅ Usuário ${uid} atualizado para plano ${planId}`);
+
+        return reply.status(200).send({ success: true });
+      }
+
+      return reply.status(200).send({ success: true });
+
+    } catch (error) {
+      console.error('❌ Erro ao processar webhook:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Erro ao processar webhook'
+      });
+    }
+  });
+
+  // GET - Verificar status de um billing
+  app.get('/billing/:billingId/status', async (req, reply) => {
+    try {
+      const { billingId } = req.params;
+
+      const billingRef = db.collection('billings').doc(billingId);
+      const doc = await billingRef.get();
+
+      if (!doc.exists) {
+        return reply.status(404).send({
+          success: false,
+          message: 'Billing não encontrado'
+        });
+      }
+
+      const billing = doc.data();
+
+      // Verificar no AbacatePay
+      const abacateBilling = await abacatepay.billing.retrieve(billingId);
+
+      // Atualizar status se mudou
+      if (abacateBilling.status !== billing.status) {
+        await billingRef.update({
+          status: abacateBilling.status,
+          dataAtualizacao: new Date()
+        });
+      }
+
+      return reply.status(200).send({
+        success: true,
+        billing: {
+          id: billing.billingId,
+          status: abacateBilling.status,
+          valor: billing.valor,
+          dataCriacao: billing.dataCriacao,
+          dataPagamento: billing.dataPagamento || null
+        }
+      });
+
+    } catch (error) {
+      console.error('Erro ao verificar status do billing:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Erro ao verificar status'
+      });
+    }
+  });
+
+  // ==========================================
+  // ROTA DE UPLOAD
+  // ==========================================
+
   // POST - UPLOAD (suporta FormData E base64)
   app.post('/upload', async (req, reply) => {
     let fileBuffer = null;
@@ -329,7 +716,6 @@ function buildApp() {
           userPrompt = prompt;
         }
 
-        // Converter base64 para buffer
         fileBuffer = Buffer.from(image, 'base64');
         console.log(`📁 [Upload] Imagem base64 recebida (${fileBuffer.length} bytes)`);
         console.log(`💬 [Upload] Prompt: "${userPrompt}"`);
@@ -401,7 +787,9 @@ function buildApp() {
   return app;
 }
 
-// Função de processamento de imagem
+// ==========================================
+// FUNÇÃO DE PROCESSAMENTO DE IMAGEM
+// ==========================================
 async function processImage(imagePath, userPrompt) {
   const apiKey = process.env.MOONDREAM_API_KEY;
   
@@ -439,7 +827,9 @@ async function processImage(imagePath, userPrompt) {
   return translatedAnswer.text;
 }
 
-// Handler para Vercel (Serverless)
+// ==========================================
+// HANDLER PARA VERCEL (SERVERLESS)
+// ==========================================
 let appInstance;
 
 export default async function handler(req, res) {
@@ -449,4 +839,16 @@ export default async function handler(req, res) {
   }
   
   appInstance.server.emit('request', req, res);
+}
+
+if (process.env.NODE_ENV !== 'production') {
+  const app = buildApp();
+
+  app.listen({ port: 3000, host: '0.0.0.0' }, (err, address) => {
+    if (err) {
+      console.error('❌ Erro ao iniciar o servidor:', err);
+      process.exit(1);
+    }
+    console.log(`🚀 Servidor rodando em ${address}`);
+  });
 }
