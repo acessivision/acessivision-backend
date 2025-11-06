@@ -2,7 +2,6 @@ import Fastify from 'fastify';
 import dotenv from 'dotenv';
 import multipart from '@fastify/multipart';
 import cors from '@fastify/cors';
-import translate from '@iamtraction/google-translate';
 import { vl } from 'moondream';
 import fs from 'fs/promises';
 import path from 'path';
@@ -10,6 +9,7 @@ import { fileURLToPath } from 'url';
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
+import { Translate } from '@google-cloud/translate/build/src/v2/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -35,8 +35,36 @@ try {
 const db = getFirestore();
 const auth = getAuth();
 
+// ✅ Inicialização do Google Cloud Translation
+const translator = new Translate({
+  projectId: process.env.GOOGLE_CLOUD_PROJECT_ID,
+  credentials: {
+    client_email: process.env.GOOGLE_CLOUD_CLIENT_EMAIL,
+    private_key: process.env.GOOGLE_CLOUD_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+  }
+});
+
 // Diretório temporário do Vercel
 const uploadDir = '/tmp/uploads';
+
+// ✅ Função de tradução com Google Cloud Translation API
+async function translateText(text, targetLanguage) {
+  try {
+    console.log(`🌐 [GoogleTranslate] Traduzindo para ${targetLanguage}: "${text.substring(0, 50)}..."`);
+    
+    const [translation] = await translator.translate(text, targetLanguage);
+    
+    console.log(`✅ [GoogleTranslate] Tradução concluída: "${translation.substring(0, 50)}..."`);
+    
+    return translation;
+  } catch (error) {
+    console.error(`❌ [GoogleTranslate] Erro ao traduzir:`, error.message);
+    
+    // Se a tradução falhar, retorna o texto original
+    console.warn(`⚠️ [GoogleTranslate] Retornando texto original sem tradução`);
+    return text;
+  }
+}
 
 // Função para criar instância do Fastify
 function buildApp() {
@@ -48,7 +76,7 @@ function buildApp() {
 
   // ✅ CORS configurado corretamente
   app.register(cors, { 
-    origin: true, // Aceita qualquer origem dinamicamente
+    origin: true,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
@@ -401,7 +429,7 @@ function buildApp() {
   return app;
 }
 
-// Função de processamento de imagem
+// ✅ Função de processamento de imagem com Google Cloud Translation
 async function processImage(imagePath, userPrompt) {
   const apiKey = process.env.MOONDREAM_API_KEY;
   
@@ -409,34 +437,46 @@ async function processImage(imagePath, userPrompt) {
     throw new Error("MOONDREAM_API_KEY não encontrada!");
   }
 
-  console.log(`🌐 Traduzindo prompt: "${userPrompt}"`);
-  const translatedPrompt = await translate(userPrompt, { from: 'pt', to: 'en' });
-  console.log(`🌐 Prompt traduzido: "${translatedPrompt.text}"`);
+  try {
+    // Traduzir prompt PT → EN
+    console.log(`🌐 Traduzindo prompt para inglês...`);
+    const translatedPrompt = await translateText(userPrompt, 'en');
+    console.log(`🌐 Prompt traduzido: "${translatedPrompt}"`);
 
-  const model = new vl({ apiKey });
-  const encodedImage = await fs.readFile(imagePath);
+    // Processar imagem com Moondream
+    const model = new vl({ apiKey });
+    const encodedImage = await fs.readFile(imagePath);
 
-  const captionResult = await model.query({ 
-    image: encodedImage, 
-    question: translatedPrompt.text 
-  });
+    console.log(`🤖 Enviando para Moondream...`);
+    const captionResult = await model.query({ 
+      image: encodedImage, 
+      question: translatedPrompt 
+    });
 
-  let finalAnswer;
-  if (typeof captionResult.answer === 'string') {
-    finalAnswer = captionResult.answer;
-  } else {
-    let assembledAnswer = '';
-    for await (const chunk of captionResult.answer) {
-      assembledAnswer += chunk;
+    // Processar resposta
+    let finalAnswer;
+    if (typeof captionResult.answer === 'string') {
+      finalAnswer = captionResult.answer;
+    } else {
+      let assembledAnswer = '';
+      for await (const chunk of captionResult.answer) {
+        assembledAnswer += chunk;
+      }
+      finalAnswer = assembledAnswer;
     }
-    finalAnswer = assembledAnswer;
-  }
 
-  console.log(`🤖 Resposta do Moondream: "${finalAnswer}"`);
-  const translatedAnswer = await translate(finalAnswer, { to: 'pt' });
-  console.log(`🌐 Resposta traduzida: "${translatedAnswer.text}"`);
-  
-  return translatedAnswer.text;
+    console.log(`🤖 Resposta do Moondream: "${finalAnswer}"`);
+    
+    // Traduzir resposta EN → PT
+    console.log(`🌐 Traduzindo resposta para português...`);
+    const translatedAnswer = await translateText(finalAnswer, 'pt');
+    console.log(`🌐 Resposta traduzida: "${translatedAnswer}"`);
+    
+    return translatedAnswer;
+  } catch (error) {
+    console.error('❌ Erro ao processar imagem:', error);
+    throw error;
+  }
 }
 
 // Handler para Vercel (Serverless)
