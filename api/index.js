@@ -439,15 +439,15 @@ async function processImage(imagePath, userPrompt) {
 
   try {
     // Traduzir prompt PT → EN
-    console.log(`🌐 Traduzindo prompt para inglês...`);
+    console.log(`🌐 [Tradução] Traduzindo prompt para inglês: "${userPrompt}"`);
     const translatedPrompt = await translateText(userPrompt, 'en');
-    console.log(`🌐 Prompt traduzido: "${translatedPrompt}"`);
+    console.log(`✅ [Tradução] Prompt traduzido: "${translatedPrompt}"`);
 
     // Processar imagem com Moondream
     const model = new vl({ apiKey });
     const encodedImage = await fs.readFile(imagePath);
 
-    console.log(`🤖 Enviando para Moondream...`);
+    console.log(`🤖 [Moondream] Enviando requisição...`);
     const captionResult = await model.query({ 
       image: encodedImage, 
       question: translatedPrompt 
@@ -465,16 +465,17 @@ async function processImage(imagePath, userPrompt) {
       finalAnswer = assembledAnswer;
     }
 
-    console.log(`🤖 Resposta do Moondream: "${finalAnswer}"`);
+    console.log(`✅ [Moondream] Resposta original (EN): "${finalAnswer}"`);
     
     // Traduzir resposta EN → PT
-    console.log(`🌐 Traduzindo resposta para português...`);
+    console.log(`🌐 [Tradução] Traduzindo resposta para português...`);
     const translatedAnswer = await translateText(finalAnswer, 'pt');
-    console.log(`🌐 Resposta traduzida: "${translatedAnswer}"`);
+    console.log(`✅ [Tradução] Resposta final (PT): "${translatedAnswer}"`);
     
+    // Garantir que retorna a versão traduzida
     return translatedAnswer;
   } catch (error) {
-    console.error('❌ Erro ao processar imagem:', error);
+    console.error('❌ [ProcessImage] Erro ao processar imagem:', error);
     throw error;
   }
 }
