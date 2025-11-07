@@ -98,10 +98,6 @@ function buildApp() {
     console.log(`📥 ${request.method} ${request.url}`);
   });
 
-  app.addHook('onSend', async (request, reply) => {
-    reply.header('Access-Control-Allow-Origin', '*');
-  });
-
   // Health check
   app.get('/', async (req, reply) => {
     return { 
